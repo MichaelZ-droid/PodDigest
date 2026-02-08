@@ -1,0 +1,100 @@
+
+-- 创作者/播主表
+CREATE TABLE creators (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  avatar_url TEXT,
+  platform TEXT NOT NULL DEFAULT 'xiaoyuzhou',
+  platform_id TEXT NOT NULL,
+  homepage_url TEXT NOT NULL,
+  rss_url TEXT,
+  description TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(platform, platform_id)
+);
+
+-- 用户订阅表
+CREATE TABLE subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  creator_id UUID REFERENCES creators(id) ON DELETE CASCADE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, creator_id)
+);
+
+-- 播客单集内容表
+CREATE TABLE episodes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  creator_id UUID REFERENCES creators(id) ON DELETE CASCADE NOT NULL,
+  title TEXT NOT NULL,
+  platform_episode_id TEXT NOT NULL,
+  original_url TEXT NOT NULL,
+  duration INTEGER,
+  published_at TIMESTAMPTZ,
+  thumbnail_url TEXT,
+  audio_url TEXT,
+  stored_audio_path TEXT,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'downloading', 'transcribing', 'summarizing', 'completed', 'failed')),
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(platform_episode_id)
+);
+
+-- AI处理结果表
+CREATE TABLE summaries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  episode_id UUID REFERENCES episodes(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  transcript TEXT,
+  summary TEXT,
+  key_points JSONB DEFAULT '[]'::jsonb,
+  keywords JSONB DEFAULT '[]'::jsonb,
+  timestamps JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 用户阅读记录表
+CREATE TABLE read_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  episode_id UUID REFERENCES episodes(id) ON DELETE CASCADE NOT NULL,
+  read_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, episode_id)
+);
+
+-- 启用 RLS
+ALTER TABLE creators ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE episodes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE read_history ENABLE ROW LEVEL SECURITY;
+
+-- creators 策略: 所有人可读，认证用户可创建
+CREATE POLICY "Anyone can view creators" ON creators FOR SELECT USING (true);
+CREATE POLICY "Authenticated users can create creators" ON creators FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+-- subscriptions 策略: 用户只能管理自己的订阅
+CREATE POLICY "Users can view own subscriptions" ON subscriptions FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can create own subscriptions" ON subscriptions FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete own subscriptions" ON subscriptions FOR DELETE USING (auth.uid() = user_id);
+
+-- episodes 策略: 所有认证用户可查看和创建
+CREATE POLICY "Authenticated users can view episodes" ON episodes FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "Authenticated users can create episodes" ON episodes FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Authenticated users can update episodes" ON episodes FOR UPDATE USING (auth.uid() IS NOT NULL);
+
+-- summaries 策略: 所有认证用户可查看和创建
+CREATE POLICY "Authenticated users can view summaries" ON summaries FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "Authenticated users can create summaries" ON summaries FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Authenticated users can update summaries" ON summaries FOR UPDATE USING (auth.uid() IS NOT NULL);
+
+-- read_history 策略: 用户只能管理自己的阅读记录
+CREATE POLICY "Users can view own read history" ON read_history FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can create own read history" ON read_history FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- 创建索引优化查询
+CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
+CREATE INDEX idx_subscriptions_creator_id ON subscriptions(creator_id);
+CREATE INDEX idx_episodes_creator_id ON episodes(creator_id);
+CREATE INDEX idx_episodes_status ON episodes(status);
+CREATE INDEX idx_episodes_published_at ON episodes(published_at DESC);
+CREATE INDEX idx_read_history_user_id ON read_history(user_id);

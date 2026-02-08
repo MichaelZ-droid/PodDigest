@@ -1,0 +1,6 @@
+
+-- Clean up test data for fresh testing
+DELETE FROM summaries;
+DELETE FROM episodes;
+DELETE FROM subscriptions;
+DELETE FROM creators;
